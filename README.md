@@ -58,9 +58,6 @@ Low and high volatility regimes have a small positive mean. The mid regime has a
 ![PCA cumulative variance](figs/11_pca_cumvar.png)  
 Many components are needed. The space is not very low rank.
 
-### Missingness heatmap for top missing features
-![Missingness heatmap](figs/12_missingness_heatmap.png)  
-Families E M S V show blocks of missing data. Plan imputation with time safe logic.
 
 ## Key numbers
 Mean next day excess return is near zero with a small positive tilt. Daily standard deviation is near one percent. Lag one autocorrelation is about minus zero point zero four five. Top absolute correlations in sample include M four near minus zero point zero six six and V thirteen near plus zero point zero six two and M one near plus zero point zero four six. Treat these with care.
