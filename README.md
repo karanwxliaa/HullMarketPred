@@ -1,26 +1,55 @@
 # Hull Market Prediction
 
 ## Overview
-We predict next day market return and choose a daily allocation to the S and P five hundred. The goal is to beat the index while keeping volatility within one hundred twenty percent of the market. The metric is a Sharpe like score that punishes excess volatility and underperformance.
+We predict next day market return and choose a daily allocation between zero and two. The competition evaluates a portfolio style score that rewards higher mean excess return but penalizes excessive volatility. Our work includes exploratory data analysis and a set of models that forecast next day market forward excess return and then map those forecasts to a position in [0, 2].
 
 ## Problem statement
-We predict forward returns and forward excess returns over the risk free rate. We output a daily allocation between zero and two. We want better return than the index under the volatility limit. We use the daily features provided by the competition.
+We predict forward returns and forward excess returns over the risk free rate. From those forecasts we derive a daily allocation between zero and two. We want better return than a neutral allocation with volatility close to the given limit. We also want models and mapping rules that are stable across market regimes.
 
 ## Data
-Train has eight thousand nine hundred ninety rows and ninety eight columns. The feature families are D E I M P S V. Targets are forward_returns and market_forward_excess_returns. Family D has no missing values. Families M S V E have notable missing values.
+Train has eight thousand nine hundred ninety rows and ninety eight columns. Each row is a trading day. The target columns are `forward_returns`, `risk_free_rate` and `market_forward_excess_returns`. Features belong to families `M*` (market and technical), `E*` (macro), `I*` (rates), `P*` (valuation), `V*` (volatility), `S*` (sentiment), `MOM*` (momentum) and `D*` (binary).  
+Test has the same features, plus lagged label features `lagged_forward_returns`, `lagged_risk_free_rate` and `lagged_market_forward_excess_returns`. In our code we create the same lagged columns in train so that train and test share the same schema.
 
-## How to run
-Open the notebook named hull_tactical_eda.ipynb. Place the data in the path used by the notebook or update the paths. Run all cells. The figures below are saved in figs.
+Missing values are common in some families, especially early in the history. In the modeling code we drop columns with very high missingness or near zero variance and then use median imputation for the rest.
+
+## Repository layout
+
+- `hull_tactical_eda.ipynb`  
+  Exploratory data analysis. This notebook reproduces the figures that appear in the report and README. It looks at distributions, autocorrelation, rolling volatility, top correlations, decile curves and missingness.
+
+- `hull_tactical_modeling.ipynb`  
+  Main modeling notebook. It uses the reusable helpers in `src/pipeline.py` to train several models on the same target:
+  - ElasticNet anchor model  
+  - Ridge with top correlation feature pre selection  
+  - RandomForest on a restricted set of core features (`M*`, `V*`, `MOM*`, `S*` and lagged labels)  
+  - PCA plus Ridge  
+  - PLS regression  
+  - HistGradientBoosting  
+
+  For each model we run time aware cross validation, select a mapping scale `k` under a volatility cap, optionally fit an isotonic calibration on out of fold predictions and finally train on the full history.
+
+- `src/pipeline.py`  
+  Shared code for preprocessing, time series cross validation, mapping and models. It includes:
+  - `add_lagged_labels` to add the three lagged label columns to train  
+  - `get_feature_columns` to intersect train and test columns and drop obvious non feature columns  
+  - `drop_sparse_and_constant` to keep only columns with enough coverage and non zero variance  
+  - `make_elasticnet_model`, `make_ridge_model`, `make_rf_model`, `make_pca_ridge_model`, `make_pls_model`, `make_hgb_model` for model construction  
+  - `time_series_cv_indices` for walk forward index splits with a gap  
+  - `evaluate_k_grid` and `train_with_cv_and_k` to pick the mapping scale `k` that maximizes mean position times return under a volatility cap  
+  - `predict_positions` to turn a trained model and input features into positions in [0, 2].
+
+- `figs/`  
+  Static images and the CSV table from the EDA notebook.
+
+## How to run the notebooks
+
+1. Download the competition data from Kaggle and place `train.csv` and `test.csv` under `data/hull-tactical-market-prediction/`.
+2. Open `hull_tactical_eda.ipynb`. Run all cells to recompute summary tables and figures. The figures are saved into the `figs` directory.
+3. Open `hull_tactical_modeling.ipynb`. Run all cells. For each model you will see a short summary of the mapping scale `k` selected on cross validation. At the end the notebook prints the mean return and volatility ratio of a simple equal weight blend of positions across all models.
+
+The modeling notebook is designed to be run locally or in a Kaggle Notebook with Internet disabled.
 
 ## EDA summary with visuals
-
-### Next day excess returns over time
-![Next day excess returns over time](figs/01_excess_timeseries.png)  
-The series is noisy. Large moves cluster. This shows regime shifts.
-
-### Rolling mean window sixty three
-![Rolling mean](figs/02_rolling_mean.png)  
-The mean stays near zero. Local trends drift over time.
 
 ### Rolling annualized volatility window sixty three
 ![Rolling annualized volatility](figs/03_rolling_vol.png)  
@@ -50,27 +79,12 @@ Higher deciles map to higher next day excess. This shape supports a trend rule.
 ![Deciles M1](figs/07_deciles_M1.png)  
 The curve rises across deciles. This also supports a trend rule.
 
-### Mean next day excess by volatility regime
-![Volatility regime bar](figs/10_vol_regime_bar.png)  
-Low and high volatility regimes have a small positive mean. The mid regime has a small negative mean. This supports a vol aware allocation.
-
-### PCA cumulative explained variance
-![PCA cumulative variance](figs/11_pca_cumvar.png)  
-Many components are needed. The space is not very low rank.
-
-
 ## Key numbers
-Mean next day excess return is near zero with a small positive tilt. Daily standard deviation is near one percent. Lag one autocorrelation is about minus zero point zero four five. Top absolute correlations in sample include M four near minus zero point zero six six and V thirteen near plus zero point zero six two and M one near plus zero point zero four six. Treat these with care.
-
-## Files
-The notebook is hull_tactical_eda.ipynb.  
-Figures are in figs.  
-The table for the top twenty correlations is figs slash zero six underscore top twenty underscore abs underscore corr underscore table dot csv.
+Mean next day excess return is near zero with a small positive trend. One day autocorrelation is around minus zero point zero four. Individual feature correlations are small, up to abs value near zero point zero seven. The largest absolute correlations appear in some D family and M family features and in a few V family features. Treat these with care.
 
 ## Next steps
-1. Use time safe cross validation with purge and embargo  
-2. Impute missing values with forward safe methods  
-3. Start with features from D and M and selected V features with stable shapes  
-4. Try linear with regularization and tree based models and simple bins for non linear effects  
-5. Track realized volatility of the allocation and keep it within the limit  
-6. Blend decorrelated signals and test in rolling windows out of sample
+1. Use time safe cross validation with purge and embargo (we already apply a small gap between train and validation splits).  
+2. Extend rolling feature engineering and regime driven scaling in the modeling notebook.  
+3. Explore more robust blending of models by solving a small mean variance optimization problem on out of fold returns.  
+4. Track realized volatility of the allocation and keep it within the given limit.  
+5. Keep the repository organized so that EDA, modeling code and report can evolve together.
